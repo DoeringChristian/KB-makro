@@ -163,7 +163,7 @@ kbmk_error_t kbmk_handle_kb_events(){
             int input_read;
             struct input_event event;
             input_read = read(event_files[i], &event, sizeof(event));
-            if(input_read == sizeof(event) && event.type == EV_KEY){
+            if(input_read == sizeof(event) && event.type == EV_KEY && event.value == 1){
                 printf("code: %x, type: %x, time: %x , value: %x\n", event.code, event.type, event.time.tv_usec, event.value);
                 if(kbmk_keyboards[i].command[event.code] != NULL){
                     printf("command: %s\n", kbmk_keyboards[i].command[event.code]);
