@@ -129,7 +129,7 @@ struct kbmk_keyboard_list *kbmk_parse(int fd){
                     buffer[buffer_count] = 0;
                     buffer_count++;
                     uint16_t keycode;
-                    sscanf(buffer, "%i", &keycode);
+                    sscanf(buffer, "%4u", &keycode);
                     list->tail->keys[keycode] = KBMK_KEY_INIT(malloc(strlen(buffer)));
                     strcpy((list->tail->keys)[keycode].command, &(buffer[5]));
 
