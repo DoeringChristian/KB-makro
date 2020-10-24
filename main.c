@@ -1,30 +1,23 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdint.h>
-#include <string.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <fcntl.h>
-#include <linux/input.h>
 
 #include "kbmk.h"
 
-
-
 int main(int argc, char **argv){
-    FILE *fp;
-    if(argc <= 1){
-        printf("%s", help_string);
-    }
-    else{
-        printf("%s\n", argv[1]);
-        fp = fopen(argv[1], "r");
-    }
-    parse_file(fp);
-    kbmk_handle_kb_events();
-    kbmk_keyboards_free();
+    if(argc < 2)
+      return 0;
+    
+    printf("test\n");
+    int fd = open(argv[1], O_RDONLY);
+
+    struct kbmk_keyboard_list *list = kbmk_parse(fd);
+    close(fd);
+
+
+    kbmk_main(list);
+
+    kbmk_keyboard_list_free(list);
     return 0;
 }
-
-
-

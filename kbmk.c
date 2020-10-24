@@ -1,34 +1,57 @@
 #include "kbmk.h"
 
-//const char help_string[] = "kb_makro [-l][-m file_path][event]\n";
-const char help_string[] = "kb_makro [file_path]";
-const char alph_digit[] = "0123456789";
-const char file_devices[] = "/proc/bus/input/devices";
-const char file_events[] = "/dev/input/";
-uint keyboard_count = 0;
-
-
-
-kbmk_error_t parse_file(FILE *fp){
-    kbmk_error_t err;
-
-    if(fp == NULL){
-        err.file = 1;
-        return err;
+struct kbmk_keyboard *kbmk_keyboard_list_push_back(struct kbmk_keyboard_list *list, struct kbmk_keyboard *keyboard){
+    if(list->head == NULL){
+        list->head = keyboard;
+        list->tail = list->head;
     }
-    for(int i = 0;i < MAX_KEYBOARDS;i++){
-        for(int j = 0;j < MAX_EVENTS;j++){
-            kbmk_keyboards[i].command[j] = NULL;
+    else{
+        
+        list->tail->next = keyboard;
+        list->tail = list->tail->next;
+    }
+    return list->tail;
+}
+void kbmk_keyboard_list_free(struct kbmk_keyboard_list *list){
+    if(list == NULL){
+
+    }
+    else if(list->head == NULL){
+        free(list);
+    }
+    else{
+        kbmk_keyboard_free(list->head);
+        free(list);
+    }
+}
+void kbmk_keyboard_free(struct kbmk_keyboard *keyboard){
+    if(keyboard == NULL){
+
+    }
+    else{
+        for(int i = 0;i < MAX_KEYS;i++){
+            free(keyboard->keys[i].command);
         }
+        kbmk_keyboard_free(keyboard->next);
+        free(keyboard);
     }
+}
+
+struct kbmk_keyboard_list *kbmk_parse(int fd){
+
+    
+    struct kbmk_keyboard_list *list = malloc(sizeof(struct kbmk_keyboard_list));
+
+    *list = kBMK_KEYBOARD_LIST_INIT();
 
     uint8_t state = PARSER_STATE_BEGINING;
     uint8_t prev_state = PARSER_STATE_BEGINING;
-    int c = 0;
+    char c = 0;
     char buffer[1024];
+    ssize_t ret = 0;
     uint16_t buffer_count = 0;
     do{
-        c = fgetc(fp);
+        ret = read(fd, &c, sizeof(char));
         switch(state){
             case PARSER_STATE_BEGINING:
                 if(c == '-'){
@@ -42,7 +65,7 @@ kbmk_error_t parse_file(FILE *fp){
                 if(c == '-'){
                     state = PARSER_STATE_KBID;
                 }
-                else if(contains_const(c, alph_digit)){
+                else if(strchr(DIGITS_10, c) != NULL){
                     buffer[buffer_count] = c;
                     buffer_count++;
 
@@ -63,12 +86,13 @@ kbmk_error_t parse_file(FILE *fp){
                 else if(c == '\n'){
                     buffer[buffer_count] = 0;
                     buffer_count++;
-                    if(keyboard_count < MAX_KEYBOARDS){
-                        kbmk_keyboards[keyboard_count].event_path = malloc(strlen(file_events)+strlen(buffer)+1);
-                        strcpy(kbmk_keyboards[keyboard_count].event_path, file_events);
-                        strcat(kbmk_keyboards[keyboard_count].event_path, buffer);
-                        keyboard_count++;
-                    }
+
+                    struct kbmk_keyboard *keyboard = malloc(sizeof(struct kbmk_keyboard));
+                    *keyboard = KBMK_KEYBOARD_INIT(malloc(strlen(buffer)+1));
+
+                    *kbmk_keyboard_list_push_back(list, keyboard); 
+                    strcpy(list->tail->path, buffer);
+                    
                     buffer_count = 0;
 
                     state = PARSER_STATE_NEWLINE;
@@ -78,7 +102,7 @@ kbmk_error_t parse_file(FILE *fp){
                 }
                 break;
             case PARSER_STATE_ADDRESS:
-                if(contains_const(c, alph_digit)){
+                if(strchr(DIGITS_10, c) != NULL){
                     buffer[buffer_count] = c;
                     buffer_count++;
 
@@ -101,18 +125,18 @@ kbmk_error_t parse_file(FILE *fp){
 
                     state = PARSER_STATE_COMMAND;
                 }
-                else if(c == '\n' || c == EOF){
+                else if(c == '\n' || ret == 0){
                     buffer[buffer_count] = 0;
                     buffer_count++;
                     uint16_t keycode;
                     sscanf(buffer, "%i", &keycode);
-                    kbmk_keyboards[keyboard_count-1].command[keycode] = malloc(strlen(&(buffer[5]))+1);
-                    strcpy(kbmk_keyboards[keyboard_count-1].command[keycode], &(buffer[5]));
+                    list->tail->keys[keycode] = KBMK_KEY_INIT(malloc(strlen(buffer)));
+                    strcpy((list->tail->keys)[keycode].command, &(buffer[5]));
 
                     buffer_count = 0;
 
-                    if(c == EOF)
-                        return err;
+                    if(ret == 0)
+                        return NULL;
 
                     state = PARSER_STATE_NEWLINE;
                 }
@@ -122,72 +146,76 @@ kbmk_error_t parse_file(FILE *fp){
                 break;
             case PARSER_STATE_ERROR:
             default:
-                err.parse_file = 1;
-                return err;
+                
+                return NULL;
                 break;
         }
-    } while(c != EOF);
+    } while(ret != 0);
+    return list;
+}
+
+void kbmk_main(struct kbmk_keyboard_list *list){
+
+    if(list == NULL){
+        return ;
+    }
+    else if(list->head == NULL){
+        return ;
+    }
+
+    //int fanotfd = fanotify_init(FAN_CLOEXEC | FAN_CLASS_CONTENT | FAN_NONBLOCK, O_RDONLY);
+    int list_size = 0;
+    for(struct kbmk_keyboard *tmp = list->head;tmp != NULL; tmp = tmp->next){
+        list_size++;
+    }
+    struct pollfd pfd[list_size];
+
+    int ioctl_flag, ioctl_ret;
+    {
+        int i = 0;
+        for(struct kbmk_keyboard *tmp = list->head;tmp != NULL; tmp = tmp->next, i++){
+            tmp->fd = open(tmp->path, O_RDONLY);
+            pfd[i].fd = tmp->fd;
+            pfd[i].events = POLLIN;
+            ioctl_ret = ioctl(tmp->fd, EVIOCGRAB, &ioctl_flag);
+        }
+    }
+
     
-}
+    /*int flag, ret;
+    ret = ioctl(event_files[i], EVIOCGRAB, &flag);*/
 
-void kbmk_keyboards_free(){
-    for(int i = 0;i < MAX_KEYBOARDS;i++){
-        free(kbmk_keyboards[i].event_path);
-        for(int j = 0;j < MAX_EVENTS;j++){
-            if(kbmk_keyboards[i].command[j] != NULL)
-                free(kbmk_keyboards[i].command[j]);
-        }
-    }
-}
-
-kbmk_error_t kbmk_handle_kb_events(){
-    kbmk_error_t err;
-    kbmk_flags.halt = 0;
-    int event_files[keyboard_count];
-    for(int i = 0;i < keyboard_count;i++){
-        event_files[i] = open(kbmk_keyboards[i].event_path, O_RDONLY);
-        if(event_files[i] == -1){
-            err.handle_kb_events_open = 1;
-            continue;
-        }
-        int flag, ret;
-        ret = ioctl(event_files[i], EVIOCGRAB, &flag);
-        if(ret == -1){
-            err.handle_kb_events_grab = 1;
-            continue;
-        }
-        printf("%s\n", kbmk_keyboards[i].event_path);
-    }
-    while(kbmk_flags.halt == 0){
-        for(int i = 0;i < keyboard_count;i++){
-            int input_read;
-            struct input_event event;
-            input_read = read(event_files[i], &event, sizeof(event));
-            if(input_read == sizeof(event) && event.type == EV_KEY && event.value == 1){
-                printf("code: %x, type: %x, time: %x , value: %x\n", event.code, event.type, event.time.tv_usec, event.value);
-                if(kbmk_keyboards[i].command[event.code] != NULL){
-                    printf("command: %s\n", kbmk_keyboards[i].command[event.code]);
-                    if(kbmk_keyboards[i].command[event.code][0] == ';'){
-                        kbmk_flags.halt = 1;
-                        printf("exit\n");
-                    }
-                    else{
-                        system(kbmk_keyboards[i].command[event.code]);
+    int ev_size = 0;
+    struct input_event event;
+    while(1){
+        poll(pfd, list_size, -1);
+        for(int i = 0;i < list_size;i++){
+            if((pfd[i].revents & POLLIN) == POLLIN){
+                ev_size = read(pfd[i].fd, &event, sizeof(struct input_event));
+                if(ev_size == sizeof(event) && event.type == EV_KEY && event.value == 1){
+                    printf("code: %x, type: %x, time: %x , value: %x\n", event.code, event.type, event.time.tv_usec, event.value);
+                    struct kbmk_keyboard *tmp = list->head;
+                    for(int j = 0;j < i;tmp = tmp->next, j++);
+                    if(tmp->keys[event.code].command != NULL){
+                        if(!strcmp(tmp->keys[event.code].command,";")){
+                            return;
+                        }
+                        else{
+                            popen(tmp->keys[event.code].command, "r");
+                        }
                     }
                 }
             }
         }
+        
+                
     }
-    return err;
-}
+    {
+        int i = 0;
+        for(struct kbmk_keyboard *tmp = list->head;tmp != NULL; tmp = tmp->next, i++){
+            tmp->fd = close(tmp->fd);
+        }
+    }
 
-int contains_const(char a, const char *b){
-    int match = 0;
-    int i = 0;
-    while(b[i] != 0){
-        if(a == b[i])
-            match = 1;
-        i++;
-    }
-    return match;
+
 }
