@@ -1,0 +1,10 @@
+[Unit]
+Description=Keyboard makro
+
+[Service]
+Type=simple
+Restart=always
+ExecStart=/home/doeringc/Utils/KB-makro/kb_makro /home/doeringc/Utils/KB-makro/a.kb
+
+[Install]
+WantedBy=multi-user.target

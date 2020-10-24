@@ -1,3 +1,4 @@
--event12
+-/dev/input/by-id/usb-SINO_WEALTH_USB_KEYBOARD-event-kbd
 0001 ;
 0002 echo test0
+0003 export DISPLAY=:0.0 && xdotool key 1 Return
